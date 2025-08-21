@@ -1,4 +1,4 @@
-/* voter_guide.js — Single-file, fixed-path implementation (handles SurveyMonkey 2-row headers)
+/* voter_guide.js — Single-file, fixed-path (always show all wards, robust centroids, issue filters)
    Dependencies (load in index.html BEFORE this file):
      - Leaflet JS/CSS
      - Papa Parse
@@ -29,7 +29,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     return Papa.parse(text, { skipEmptyLines: 'greedy' }); // array-of-arrays
   }
 
-  // ---------- Survey cleaning (SurveyMonkey with 2 header rows) ----------
+  function ynuNormalize(s) {
+    const t = lc(normalize(s));
+    if (t === 'yes' || t === 'no' || t === 'undecided') return t;
+    return '';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => (
+      { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+    ));
+  }
+
+  // ---------- Survey cleaning (handles 2-row SurveyMonkey headers + ward slice) ----------
   function cleanSurveyFromPapa(papa) {
     const data = papa.data;
     if (!Array.isArray(data) || data.length < 2) {
@@ -41,7 +53,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Detect if header1 is a choices row
     const CHOICE_TOKENS = new Set([
-      'yes','no','undecided','additional comments','additional comments:','open-ended response','open-ended response:',
+      'yes','no','undecided','additional comments','additional comments:',
+      'open-ended response','open-ended response:',
       'mayor','first name','last name','email address','ward'
     ]);
     const isChoiceToken = (s) => {
@@ -118,7 +131,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (header1IsChoices && header1[c]) {
               wardVal = normalize(header1[c]); // e.g., "Ward 14"
             } else {
-              // fallback: if choices row not available, use header0 or the cell value
+              // fallback: header0 or the cell value
               wardVal = normalize(header0[c]) || v;
             }
             break;
@@ -172,45 +185,230 @@ window.addEventListener('DOMContentLoaded', async () => {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors'
   }).addTo(map);
+
+  const polygonLayer = L.geoJSON(null, { style: baseWardStyle }).addTo(map);
   const markerGroup = L.layerGroup().addTo(map);
+
+  function baseWardStyle() {
+    return { color: '#555', weight: 1, fillOpacity: 0.06 };
+  }
 
   // ---------- Load data ----------
   const wardsGeo = await loadJSON(WARDS_PATH);
-  const wardLayer = L.geoJSON(wardsGeo, { style: { color: '#444', weight: 1, fillOpacity: 0.07 } }).addTo(map);
-  try { map.fitBounds(wardLayer.getBounds(), { padding: [20, 20] }); } catch {}
+  polygonLayer.addData(wardsGeo);
+  try { map.fitBounds(polygonLayer.getBounds(), { padding: [20, 20] }); } catch {}
 
   const survey = cleanSurveyFromPapa(await loadCSV(SURVEY_PATH));
 
-  // ---------- Build ward centroids + keys (prefer ward_num / label) ----------
-  const wardCenters = []; // { key, name, lat, lng }
-  for (const f of wardsGeo.features) {
-    const p = f.properties || {};
-    const key = p.ward_num
-      ? String(parseInt(String(p.ward_num), 10))
-      : (String((p.label || p.WARD || p.Ward || p.name || p.id || '')).match(/\d+/) || [''])[0];
-    const disp = normalize(p.label) || (key ? `Ward ${key}` : '(unknown ward)');
+  // ---------- Ward centers + keys (prefer ward_num / label) ----------
+  const wardCenters = []; // { key, name, lat, lng, feature }
+  (function buildWardCenters(){
+    for (const f of wardsGeo.features) {
+      const p = f.properties || {};
+      const key = p.ward_num
+        ? String(parseInt(String(p.ward_num), 10))
+        : (String((p.label || p.WARD || p.Ward || p.name || p.id || '')).match(/\d+/) || [''])[0];
+      const disp = normalize(p.label) || (key ? `Ward ${key}` : '(unknown ward)');
 
-    let lat = 0, lng = 0;
-    try {
-      const c = turf.centerOfMass(f);
-      [lng, lat] = c.geometry.coordinates;
-    } catch {}
-    wardCenters.push({ key, name: disp, lat, lng });
-  }
+      // robust centroid (centerOfMass -> centroid -> bounds center)
+      let lat = 0, lng = 0;
+      try {
+        const com = turf.centerOfMass(f);
+        [lng, lat] = com.geometry.coordinates;
+        if (!isFinite(lat) || !isFinite(lng)) throw new Error('bad COM');
+      } catch {
+        try {
+          const cen = turf.centroid(f);
+          [lng, lat] = cen.geometry.coordinates;
+          if (!isFinite(lat) || !isFinite(lng)) throw new Error('bad centroid');
+        } catch {
+          try {
+            const ll = L.geoJSON(f).getBounds().getCenter();
+            lat = ll.lat; lng = ll.lng;
+          } catch {}
+        }
+      }
+
+      wardCenters.push({ key, name: disp, lat, lng, feature: f });
+    }
+  })();
 
   // ---------- Group survey rows by derived ward key (digits from __Ward) ----------
-  const byWard = new Map();
+  const byWardAll = new Map(); // key -> row[]
   for (const row of survey.rows) {
     const raw = survey.wardColumn ? row[survey.wardColumn] : '';
     const m = String(raw || '').match(/\d+/);
     const wkey = m ? String(parseInt(m[0], 10)) : '';
     if (!wkey) continue;
-    if (!byWard.has(wkey)) byWard.set(wkey, []);
-    byWard.get(wkey).push(row);
+    if (!byWardAll.has(wkey)) byWardAll.set(wkey, []);
+    byWardAll.get(wkey).push(row);
   }
 
-  // ---------- Candidate name builder ----------
-  function buildCandidateName(row) {
+  // ---------- UI: issue selector + answer filter ----------
+  injectControlUI();
+
+  function injectControlUI() {
+    const wrap = document.createElement('div');
+    wrap.style.position = 'absolute';
+    wrap.style.top = '12px';
+    wrap.style.left = '12px';
+    wrap.style.zIndex = 1000;
+    wrap.style.background = 'white';
+    wrap.style.border = '1px solid #ccc';
+    wrap.style.borderRadius = '12px';
+    wrap.style.padding = '8px 10px';
+    wrap.style.fontSize = '12px';
+    wrap.style.boxShadow = '0 1px 6px rgba(0,0,0,0.08)';
+
+    const title = document.createElement('div');
+    title.style.fontWeight = '600';
+    title.style.marginBottom = '6px';
+    title.textContent = 'Issue Filter';
+
+    const issueSel = document.createElement('select');
+    issueSel.style.marginRight = '6px';
+    issueSel.style.maxWidth = '360px';
+    issueSel.title = 'Issue';
+    const anyOption = document.createElement('option');
+    anyOption.value = '';
+    anyOption.textContent = '(Select an issue)';
+    issueSel.appendChild(anyOption);
+    for (const c of survey.issueColumns) {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      issueSel.appendChild(opt);
+    }
+
+    const ansSel = document.createElement('select');
+    ansSel.style.marginRight = '6px';
+    ['(Any)','Yes','No','Undecided'].forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v === '(Any)' ? '' : v;
+      opt.textContent = v;
+      ansSel.appendChild(opt);
+    });
+
+    const btnApply = document.createElement('button');
+    btnApply.textContent = 'Apply';
+    btnApply.style.marginRight = '6px';
+    styleBtn(btnApply);
+
+    const btnClear = document.createElement('button');
+    btnClear.textContent = 'Clear';
+    styleBtn(btnClear);
+
+    const legend = document.createElement('div');
+    legend.style.marginTop = '8px';
+    legend.style.color = '#444';
+    legend.innerHTML = `
+      <div style="margin-bottom:4px"><b>Ward color:</b> majority on selected issue</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${legendSwatch('#2c7a2c')} Yes
+        ${legendSwatch('#b22222')} No
+        ${legendSwatch('#b38f00')} Undecided
+        ${legendSwatch('#cccccc')} No data
+      </div>
+    `;
+
+    wrap.appendChild(title);
+    wrap.appendChild(issueSel);
+    wrap.appendChild(ansSel);
+    wrap.appendChild(btnApply);
+    wrap.appendChild(btnClear);
+    wrap.appendChild(legend);
+    map.getContainer().appendChild(wrap);
+
+    btnApply.addEventListener('click', () => applyFilters(issueSel.value || '', ansSel.value || ''));
+    btnClear.addEventListener('click', () => { issueSel.value = ''; ansSel.value = ''; applyFilters('', ''); });
+  }
+
+  function styleBtn(b) {
+    b.style.border = '1px solid #bbb';
+    b.style.background = '#fff';
+    b.style.borderRadius = '10px';
+    b.style.padding = '4px 10px';
+    b.style.cursor = 'pointer';
+  }
+  function legendSwatch(color) {
+    return `<span style="display:inline-block;width:12px;height:12px;background:${color};border:1px solid #999;border-radius:3px"></span>`;
+  }
+
+  // ---------- Filtering + rendering ----------
+  applyFilters('', ''); // initial draw
+
+  function applyFilters(issue, wantValue) {
+    // Build a filtered index by ward
+    const byWard = new Map();
+
+    for (const [wkey, rows] of byWardAll.entries()) {
+      let list = rows;
+      if (issue) {
+        list = rows.filter(r => {
+          const ans = ynuNormalize(r[issue]);
+          if (!wantValue) return ans !== ''; // "(Any)" -> keep rows that have a Y/N/U answer
+          return ans === lc(wantValue);
+        });
+      }
+      if (!issue && !wantValue) list = rows; // no filtering at all
+      byWard.set(wkey, list); // <-- note: we set it even if list.length === 0
+    }
+
+    // Update ward polygons style (color by majority on selected issue)
+    polygonLayer.setStyle((feature) => {
+      if (!issue) return baseWardStyle();
+
+      const p = feature.properties || {};
+      const key = p.ward_num
+        ? String(parseInt(String(p.ward_num), 10))
+        : (String((p.label || p.WARD || p.Ward || p.name || p.id || '')).match(/\d+/) || [''])[0];
+
+      const rows = byWardAll.get(key) || [];
+      if (!rows.length) return { color: '#777', weight: 1, fillColor: '#ccc', fillOpacity: 0.4 };
+
+      const counts = { yes: 0, no: 0, undecided: 0 };
+      for (const r of rows) {
+        const a = ynuNormalize(r[issue]);
+        if (counts.hasOwnProperty(a)) counts[a]++;
+      }
+      const total = counts.yes + counts.no + counts.undecided;
+      if (!total) return { color: '#777', weight: 1, fillColor: '#ccc', fillOpacity: 0.4 };
+
+      let color = '#cccccc';
+      if (counts.yes >= counts.no && counts.yes >= counts.undecided) color = '#2c7a2c';
+      else if (counts.no >= counts.yes && counts.no >= counts.undecided) color = '#b22222';
+      else color = '#b38f00';
+
+      return { color: '#555', weight: 1, fillColor: color, fillOpacity: 0.35 };
+    });
+
+    // Update markers/popups: ALWAYS place markers for all wards (even if 0 matches)
+    markerGroup.clearLayers();
+    for (const wc of wardCenters) {
+      if (!isFinite(wc.lat) || !isFinite(wc.lng)) continue;
+
+      const list = byWard.get(wc.key) || [];
+      const items = list.map(r => {
+        const name = buildCandidateNameDisplay(r);
+        const ans = issue ? (r[issue] || '').toString() : '';
+        return `<li>${name}${issue ? ` — <i>${escapeHtml(ans || '—')}</i>` : ''}</li>`;
+      }).join('');
+
+      const html = `
+        <div style="font-size:12px">
+          <div style="font-weight:600">${wc.name}</div>
+          <div>Candidates: ${list.length}${issue ? ` (issue: <i>${escapeHtml(issue)}</i>)` : ''}</div>
+          <ul style="max-height:180px;overflow:auto;margin-left:16px">${items || '<li><i>No candidates</i></li>'}</ul>
+        </div>
+      `;
+
+      L.marker([wc.lat, wc.lng]).addTo(markerGroup).bindPopup(html);
+    }
+
+    updateInfo(byWard, issue, wantValue);
+  }
+
+  function buildCandidateNameDisplay(row) {
     const direct = survey.nameColumn ? normalize(row[survey.nameColumn]) : '';
     if (direct) return direct;
     const firstCol = survey.firstCol || Object.keys(row).find(k => /first\s*name/i.test(k));
@@ -221,26 +419,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     return combined || '(name)';
   }
 
-  // ---------- Place markers per ward with candidate list ----------
-  markerGroup.clearLayers();
-  let totalMatches = 0;
-  for (const wc of wardCenters) {
-    const list = byWard.get(wc.key) || [];
-    totalMatches += list.length;
-    if (!wc.lat || !wc.lng) continue;
-
-    const items = list.map(r => `<li>${buildCandidateName(r)}</li>`).join('');
-    const html = `
-      <div style="font-size:12px">
-        <div style="font-weight:600">${wc.name}</div>
-        <div>Candidates: ${list.length}</div>
-        <ul style="max-height:160px;overflow:auto;margin-left:16px">${items}</ul>
-      </div>`;
-
-    L.marker([wc.lat, wc.lng]).addTo(markerGroup).bindPopup(html);
-  }
-
-  // ---------- Simple info control ----------
+  // ---------- Info control ----------
   const Info = L.Control.extend({
     onAdd: function() {
       const d = L.DomUtil.create('div');
@@ -249,23 +428,35 @@ window.addEventListener('DOMContentLoaded', async () => {
       d.style.border = '1px solid #ccc';
       d.style.borderRadius = '8px';
       d.style.fontSize = '12px';
-      d.innerHTML = `
-        <div><b>Survey rows:</b> ${survey.rows.length}</div>
-        <div><b>Issue cols:</b> ${survey.issueColumns.length}</div>
-        <div><b>Ward col:</b> ${survey.wardColumn || '(n/a)'}</div>
-        <div><b>Name col:</b> ${survey.nameColumn || '(n/a)'}</div>
-        <div><b>Matched candidates:</b> ${totalMatches}</div>
-      `;
+      d.id = 'info-box';
       return d;
     }
   });
   map.addControl(new Info({ position: 'topright' }));
+  function updateInfo(byWard, issue, want) {
+    const box = document.getElementById('info-box');
+    if (!box) return;
+
+    let totalRows = 0;
+    for (const rows of byWard.values()) totalRows += rows.length;
+
+    const wantText = want ? want : '(Any)';
+    const issueText = issue ? issue : '(No issue selected)';
+
+    box.innerHTML = `
+      <div><b>Survey rows (shown):</b> ${totalRows}</div>
+      <div><b>Issue:</b> ${escapeHtml(issueText)}</div>
+      <div><b>Answer filter:</b> ${escapeHtml(wantText)}</div>
+      <div><b>Total issue columns:</b> ${survey.issueColumns.length}</div>
+      <div><b>Ward col:</b> ${survey.wardColumn || '(n/a)'}</div>
+      <div><b>Name col:</b> ${survey.nameColumn || '(n/a)'}</div>
+    `;
+  }
 
   // ---------- Diagnostics (console) ----------
-  console.log('Detected columns:', survey.cols);
-  console.log('Detected wardColumn:', survey.wardColumn);
+  console.log('Ward keys from GeoJSON:', wardCenters.map(w => w.key));
+  console.log('Survey ward keys present:', Array.from(byWardAll.keys()));
   console.log('Detected nameColumn:', survey.nameColumn, 'firstCol:', survey.firstCol, 'lastCol:', survey.lastCol);
   console.log('Issue columns (first 10):', survey.issueColumns.slice(0, 10));
   console.log('Total survey rows:', survey.rows.length);
-  console.log('Total matched candidate rows to wards:', totalMatches);
 });
