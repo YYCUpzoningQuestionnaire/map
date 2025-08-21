@@ -1,11 +1,16 @@
-/* voter_guide.js — Single-file, fixed-path (always show all wards, robust centroids, issue filters)
+/* voter_guide.js — Single-file, fixed-path
+   ✔ Uses FIRST/LAST NAME FROM THE SECOND HEADER ROW (header1) explicitly
+   ✔ Issue filters, ward coloring, per-answer comments
+   ✔ Always shows all wards; robust centroids
+
    Dependencies (load in index.html BEFORE this file):
      - Leaflet JS/CSS
      - Papa Parse
      - @turf/turf
-   Files expected in the same directory:
-     - wards.geojson   (GeoJSON FeatureCollection; props include ward_num or label)
-     - survey.csv      (raw SurveyMonkey CSV export)
+
+   Files (same folder):
+     - wards.geojson
+     - survey.csv
 */
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -34,24 +39,32 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (t === 'yes' || t === 'no' || t === 'undecided') return t;
     return '';
   }
-
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => (
       { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
     ));
   }
+  function truncate(s, n = 180) {
+    const t = normalize(s);
+    if (t.length <= n) return t;
+    return t.slice(0, n - 1) + '…';
+  }
 
-  // ---------- Survey cleaning (handles 2-row SurveyMonkey headers + ward slice) ----------
+  // ---------- Survey cleaning (2-row headers + ward slice + per-issue comments) ----------
   function cleanSurveyFromPapa(papa) {
     const data = papa.data;
     if (!Array.isArray(data) || data.length < 2) {
-      return { rows: [], issueColumns: [], wardColumn: null, nameColumn: null, cols: [], firstCol: null, lastCol: null };
+      return {
+        rows: [], issueColumns: [], wardColumn: null,
+        cols: [], commentForIssue: {},
+        nameMixedCol: null, firstIdx: -1, lastIdx: -1
+      };
     }
 
-    const header0 = (data[0] || []).map(h => String(h ?? '')); // question stems
-    const header1 = (data[1] || []).map(h => String(h ?? '')); // choices row (Yes/No/Undecided/etc.)
+    const header0 = (data[0] || []).map(h => String(h ?? '')); // stems
+    const header1 = (data[1] || []).map(h => String(h ?? '')); // choices/meta (THIS is where "First name" & "Last name" live)
 
-    // Detect if header1 is a choices row
+    // Detect if header1 is a choices/meta row
     const CHOICE_TOKENS = new Set([
       'yes','no','undecided','additional comments','additional comments:',
       'open-ended response','open-ended response:',
@@ -65,13 +78,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       return false;
     };
     const nonEmpty1 = header1.filter(x => normalize(x) !== '');
-    const choiceHits = nonEmpty1.filter(isChoiceToken);
-    const header1IsChoices = nonEmpty1.length > 0 && (choiceHits.length / nonEmpty1.length >= 0.5);
+    const header1IsChoices = nonEmpty1.length > 0 &&
+      (nonEmpty1.filter(isChoiceToken).length / nonEmpty1.length >= 0.5);
 
-    // Anchors for the ward slice in header0
-    const findIdx = (re, arr) => arr.findIndex(h => re.test(h));
-    const idxStart = findIdx(/i'm a candidate for:/i, header0); // inclusive anchor
-    const idxEnd   = findIdx(/candidate name and email address/i, header0);
+    // Ward slice anchors in header0
+    const findIdx0 = (re) => header0.findIndex(h => re.test(h));
+    const idxStart = findIdx0(/i'm a candidate for:/i); // inclusive anchor
+    const idxEnd   = findIdx0(/candidate name and email address/i);
     const idxEndFallback = idxEnd >= 0 ? idxEnd
       : header0.findIndex(h => /candidate name/i.test(h) && /email/i.test(h));
 
@@ -79,18 +92,18 @@ window.addEventListener('DOMContentLoaded', async () => {
       ? { start: idxStart + 1, end: idxEndFallback }  // scan [start, end)
       : null;
 
-    // Forward-fill header0 to collapse Unnamed spillover for normal questions
+    // Forward-fill header0 to collapse "Unnamed"
     const ffillHeaders = [];
     for (let i = 0; i < header0.length; i++) {
       const h = header0[i];
       ffillHeaders[i] = (h && !/^Unnamed/i.test(h)) ? h : (i > 0 ? ffillHeaders[i - 1] : '');
     }
 
-    // Exclude ward slice indices from grouped Q/A columns
+    // Exclude ward slice from groups
     const skipIdx = new Set();
     if (wardSlice) for (let i = wardSlice.start; i < wardSlice.end; i++) skipIdx.add(i);
 
-    // Group indices by (forward-filled) header, excluding ward slice
+    // Group indices by header0 (forward-filled), excluding ward slice
     const groups = {};
     ffillHeaders.forEach((h, i) => {
       if (!h) return;
@@ -99,7 +112,34 @@ window.addEventListener('DOMContentLoaded', async () => {
       (groups[key] ||= []).push(i);
     });
 
-    // Determine where data starts (row 2 if header1 is choices; else row 1)
+    // ====== CRITICAL: lock FIRST/LAST NAME from header1 (SECOND HEADER ROW) ======
+    const firstIdx = header1.findIndex(h => /first\s*name/i.test(h));
+    const lastIdx  = header1.findIndex(h => /last\s*name/i.test(h));
+    // Also capture a single mixed name field if it exists in header0 (rarely needed)
+    const nameMixedIdx0 = header0.findIndex(h => /candidate.*name.*email.*address/i.test(h) || /^\s*name\s*$/i.test(h));
+    const nameMixedCol = nameMixedIdx0 >= 0 ? nameMixedIdx0 : -1;
+
+    // Per-issue choice/comment mapping using header1 labels
+    const commentForIssue = {};
+    const choiceIndexByGroup = {}; // group -> { yes:[], no:[], undecided:[], comment:[] }
+    if (header1IsChoices) {
+      for (const [g, idxs] of Object.entries(groups)) {
+        const bucket = { yes: [], no: [], undecided: [], comment: [] };
+        for (const idx of idxs) {
+          const lab = lc(normalize(header1[idx]));
+          if (lab === 'yes') bucket.yes.push(idx);
+          else if (lab === 'no') bucket.no.push(idx);
+          else if (lab === 'undecided') bucket.undecided.push(idx);
+          else if (lab === 'additional comments' || lab === 'additional comments:' ||
+                   lab === 'open-ended response' || lab === 'open-ended response:') {
+            bucket.comment.push(idx);
+          }
+        }
+        choiceIndexByGroup[g] = bucket;
+        commentForIssue[g] = `__COMMENT::${g}`;
+      }
+    }
+
     const dataStart = header1IsChoices ? 2 : 1;
 
     // Merge rows
@@ -109,51 +149,67 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (!Array.isArray(arr)) continue;
       const obj = {};
 
-      // Normal grouped columns
-      for (const [h, idxs] of Object.entries(groups)) {
-        let chosen = '';
-        for (const idx of idxs) {
-          const v = arr[idx];
-          if (v !== undefined && v !== null && String(v).trim() !== '') {
-            chosen = String(v).trim();
-            break;
+      // regular grouped questions
+      for (const [g, idxs] of Object.entries(groups)) {
+        if (header1IsChoices) {
+          const bucket = choiceIndexByGroup[g] || { yes: [], no: [], undecided: [], comment: [] };
+          // Answer
+          let ans = '';
+          for (const label of ['yes', 'no', 'undecided']) {
+            const arrIdxs = bucket[label];
+            if (!arrIdxs) continue;
+            for (const i of arrIdxs) {
+              const v = arr[i];
+              if (v !== undefined && v !== null && String(v).trim() !== '') {
+                ans = label.charAt(0).toUpperCase() + label.slice(1);
+                break;
+              }
+            }
+            if (ans) break;
           }
+          obj[g] = ans;
+          // Comment
+          const cField = commentForIssue[g];
+          let comm = '';
+          for (const i of (bucket.comment || [])) {
+            const v = arr[i];
+            if (v !== undefined && v !== null && String(v).trim() !== '') { comm = String(v).trim(); break; }
+          }
+          obj[cField] = comm;
+        } else {
+          // Fallback (no header1 choices)
+          let chosen = '';
+          for (const idx of idxs) {
+            const v = arr[idx];
+            if (v !== undefined && v !== null && String(v).trim() !== '') { chosen = String(v).trim(); break; }
+          }
+          obj[g] = chosen;
         }
-        obj[h] = chosen;
       }
 
-      // Derive ward from special slice: use CHOICE LABEL from header1 when present
+      // Ward from ward slice (use header1 label if present)
       if (wardSlice) {
         let wardVal = '';
         for (let c = wardSlice.start; c < wardSlice.end; c++) {
           const v = normalize(arr[c]);
           if (v) {
-            if (header1IsChoices && header1[c]) {
-              wardVal = normalize(header1[c]); // e.g., "Ward 14"
-            } else {
-              // fallback: header0 or the cell value
-              wardVal = normalize(header0[c]) || v;
-            }
+            if (header1IsChoices && header1[c]) wardVal = normalize(header1[c]);
+            else wardVal = normalize(header0[c]) || v;
             break;
           }
         }
         obj['__Ward'] = wardVal;
       }
 
-      // Keep non-empty rows
+      // ====== CRITICAL: write names from header1 second-row indices ======
+      if (firstIdx >= 0) obj['__FirstName'] = normalize(arr[firstIdx]);
+      if (lastIdx  >= 0) obj['__LastName']  = normalize(arr[lastIdx]);
+      if (nameMixedCol >= 0) obj['__NameMixed'] = normalize(arr[nameMixedCol]);
+
       if (Object.values(obj).some(v => normalize(v) !== '')) rows.push(obj);
     }
 
     const cols = Object.keys(groups).map(s => s.trim());
-
-    // Name detection; fallback to First/Last later
-    const nameColumn =
-      cols.find(c => /candidate\s*name/i.test(c)) ||
-      cols.find(c => /\bname\b/i.test(c)) ||
-      null;
-
-    // Ward column is synthetic if slice exists
-    const wardColumn = wardSlice ? '__Ward' : (cols.find(c => /\bward\b/i.test(c)) || null);
 
     // Issue columns: dominated by Yes/No/Undecided values
     const ynu = new Set(['yes','no','undecided']);
@@ -167,11 +223,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (nonEmpty > 0 && ynuCount / nonEmpty >= 0.7) issueColumns.push(c);
     }
 
-    // First/Last for fallback name
-    const firstCol = cols.find(c => /first\s*name/i.test(c)) || null;
-    const lastCol  = cols.find(c => /last\s*name/i.test(c))  || null;
+    const wardColumn = wardSlice ? '__Ward' : (cols.find(c => /\bward\b/i.test(c)) || null);
 
-    return { rows, issueColumns, wardColumn, nameColumn, cols, firstCol, lastCol };
+    return {
+      rows, issueColumns, wardColumn, cols, commentForIssue,
+      // expose indices so renderer can trust FIRST/LAST from header1
+      firstIdx, lastIdx, nameMixedCol
+    };
   }
 
   // ---------- Map ----------
@@ -201,7 +259,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const survey = cleanSurveyFromPapa(await loadCSV(SURVEY_PATH));
 
   // ---------- Ward centers + keys (prefer ward_num / label) ----------
-  const wardCenters = []; // { key, name, lat, lng, feature }
+  const wardCenters = []; // { key, name, lat, lng }
   (function buildWardCenters(){
     for (const f of wardsGeo.features) {
       const p = f.properties || {};
@@ -229,7 +287,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
-      wardCenters.push({ key, name: disp, lat, lng, feature: f });
+      wardCenters.push({ key, name: disp, lat, lng });
     }
   })();
 
@@ -335,7 +393,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ---------- Filtering + rendering ----------
-  applyFilters('', ''); // initial draw
+  applyFilters('', ''); // initial
 
   function applyFilters(issue, wantValue) {
     // Build a filtered index by ward
@@ -346,12 +404,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (issue) {
         list = rows.filter(r => {
           const ans = ynuNormalize(r[issue]);
-          if (!wantValue) return ans !== ''; // "(Any)" -> keep rows that have a Y/N/U answer
+          if (!wantValue) return ans !== '';
           return ans === lc(wantValue);
         });
       }
-      if (!issue && !wantValue) list = rows; // no filtering at all
-      byWard.set(wkey, list); // <-- note: we set it even if list.length === 0
+      if (!issue && !wantValue) list = rows; // no filtering
+      byWard.set(wkey, list);
     }
 
     // Update ward polygons style (color by majority on selected issue)
@@ -382,23 +440,31 @@ window.addEventListener('DOMContentLoaded', async () => {
       return { color: '#555', weight: 1, fillColor: color, fillOpacity: 0.35 };
     });
 
-    // Update markers/popups: ALWAYS place markers for all wards (even if 0 matches)
+    // Update markers/popups: ALWAYS place markers for all wards
     markerGroup.clearLayers();
     for (const wc of wardCenters) {
       if (!isFinite(wc.lat) || !isFinite(wc.lng)) continue;
 
       const list = byWard.get(wc.key) || [];
       const items = list.map(r => {
-        const name = buildCandidateNameDisplay(r);
+        const name = buildCandidateName(r); // <-- uses header1 "First name" & "Last name" directly
         const ans = issue ? (r[issue] || '').toString() : '';
-        return `<li>${name}${issue ? ` — <i>${escapeHtml(ans || '—')}</i>` : ''}</li>`;
+        let comm = '';
+        if (issue) {
+          const cField = survey.commentForIssue[issue];
+          if (cField) comm = r[cField] || '';
+        }
+        const right = issue
+          ? ` — <b>${escapeHtml(ans || '—')}</b>${comm ? ` — <span style="color:#555">${escapeHtml(truncate(comm))}</span>` : ''}`
+          : '';
+        return `<li>${escapeHtml(name)}${right}</li>`;
       }).join('');
 
       const html = `
         <div style="font-size:12px">
           <div style="font-weight:600">${wc.name}</div>
           <div>Candidates: ${list.length}${issue ? ` (issue: <i>${escapeHtml(issue)}</i>)` : ''}</div>
-          <ul style="max-height:180px;overflow:auto;margin-left:16px">${items || '<li><i>No candidates</i></li>'}</ul>
+          <ul style="max-height:220px;overflow:auto;margin-left:16px">${items || '<li><i>No candidates</i></li>'}</ul>
         </div>
       `;
 
@@ -408,15 +474,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     updateInfo(byWard, issue, wantValue);
   }
 
-  function buildCandidateNameDisplay(row) {
-    const direct = survey.nameColumn ? normalize(row[survey.nameColumn]) : '';
-    if (direct) return direct;
-    const firstCol = survey.firstCol || Object.keys(row).find(k => /first\s*name/i.test(k));
-    const lastCol  = survey.lastCol  || Object.keys(row).find(k => /last\s*name/i.test(k));
-    const first = firstCol ? normalize(row[firstCol]) : '';
-    const last  = lastCol  ? normalize(row[lastCol])  : '';
-    const combined = `${first} ${last}`.trim();
-    return combined || '(name)';
+  // ====== Candidate name: USE SECOND-ROW "First name" & "Last name" ======
+  function buildCandidateName(row) {
+    const fn = normalize(row['__FirstName']);
+    const ln = normalize(row['__LastName']);
+    const combo = `${fn} ${ln}`.replace(/\s+/g, ' ').trim();
+    if (combo) return combo;
+
+    // fallback: single mixed field if we captured it (rare)
+    const mix = normalize(row['__NameMixed']);
+    if (mix) {
+      // strip emails if any slipped in
+      return mix.replace(/\s*<[^>]*>/g, '').replace(/\b\S+@\S+\.\S+\b/g, '').replace(/\s+/g, ' ').trim() || '(name)';
+    }
+    return '(name)';
   }
 
   // ---------- Info control ----------
@@ -449,14 +520,14 @@ window.addEventListener('DOMContentLoaded', async () => {
       <div><b>Answer filter:</b> ${escapeHtml(wantText)}</div>
       <div><b>Total issue columns:</b> ${survey.issueColumns.length}</div>
       <div><b>Ward col:</b> ${survey.wardColumn || '(n/a)'}</div>
-      <div><b>Name col:</b> ${survey.nameColumn || '(n/a)'}</div>
+      <div><b>Name source:</b> ${survey.firstIdx >= 0 || survey.lastIdx >= 0 ? 'header1 (First/Last)' : (survey.nameMixedCol >= 0 ? 'single name field' : '(none found)')}</div>
     `;
   }
 
   // ---------- Diagnostics (console) ----------
-  console.log('Ward keys from GeoJSON:', wardCenters.map(w => w.key));
-  console.log('Survey ward keys present:', Array.from(byWardAll.keys()));
-  console.log('Detected nameColumn:', survey.nameColumn, 'firstCol:', survey.firstCol, 'lastCol:', survey.lastCol);
+  console.log('Header1 first/last indices:', { firstIdx: survey.firstIdx, lastIdx: survey.lastIdx });
+  console.log('Single-name field index in header0 (if any):', survey.nameMixedCol);
+  console.log('Issue → comment field map:', survey.commentForIssue);
   console.log('Issue columns (first 10):', survey.issueColumns.slice(0, 10));
   console.log('Total survey rows:', survey.rows.length);
 });
