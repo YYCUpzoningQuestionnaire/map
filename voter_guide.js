@@ -1,8 +1,8 @@
-/* voter_guide.js — Striped ward fills by response mix; auto-apply filters; no buttons
+/* voter_guide.js — Striped ward fills + ALWAYS show mayor icon at City Hall
    - Uses header1 "First name"/"Last name" for names
    - Issue filters, per-answer comments
-   - Robust ward centroids; markers for all wards
-   - Ward polygons filled with SVG stripe patterns proportional to Yes/No/Undecided counts
+   - Robust ward centroids; ward polygons filled by response mix (pattern tile size via STRIPE_SIZE)
+   - Mayoral candidates grouped under a single marker at Calgary City Hall (always rendered)
 
    Dependencies (load before this file):
      Leaflet, Papa Parse, @turf/turf
@@ -13,8 +13,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   const WARDS_PATH  = 'wards.geojson';
   const SURVEY_PATH = 'survey.csv';
 
-  // ---- single knob for stripe tile size (px) ----
-  const STRIPE_SIZE = 25; // change this to adjust pattern tile width/height
+  // ---- knobs you can tweak ----
+  const STRIPE_SIZE = 25; // px: pattern tile width/height
+  const CITY_HALL = { lat: 51.0453, lng: -114.0580 }; // Calgary City Hall
 
   const COLORS = { yes: '#2c7a2c', no: '#b22222', undecided: '#b38f00', nodata: '#cccccc' };
   const SVGNS = 'http://www.w3.org/2000/svg';
@@ -190,10 +191,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     wardCenters.push({key,name:disp,lat,lng});
   }
 
-  // Group rows by ward key
+  // Group rows by ward key + capture mayoral rows
   const byWardAll=new Map();
+  const mayorAll = [];
   for(const row of survey.rows){
-    const m=String(row['__Ward']||'').match(/\d+/);
+    const rawWard = String(row['__Ward']||'');
+    if (/mayor/i.test(rawWard)) {
+      mayorAll.push(row);
+      continue;
+    }
+    const m=rawWard.match(/\d+/);
     const k=m?String(parseInt(m[0],10)):'';
     if(!k) continue;
     if(!byWardAll.has(k)) byWardAll.set(k,[]);
@@ -223,8 +230,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     const legend=document.createElement('div');
     legend.style.marginTop='8px'; legend.style.color='#444';
     legend.innerHTML=`<div style="margin-bottom:4px"><b>Ward fill:</b> striped by response mix (tile ${STRIPE_SIZE}px)</div>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         ${sw(COLORS.yes)} Yes ${sw(COLORS.no)} No ${sw(COLORS.undecided)} Undecided ${sw(COLORS.nodata)} No data
+        <span style="margin-left:12px">🏛️ = Mayoral candidates</span>
       </div>`;
 
     wrap.appendChild(title);
@@ -301,6 +309,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // --- Filtering + rendering ---
   function applyFilters(issue, wantValue){
+    // per-ward filtered rows
     const byWard=new Map();
     for(const [k,rows] of byWardAll.entries()){
       let list=rows;
@@ -313,7 +322,17 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
       byWard.set(k, list);
     }
+    // mayor filtered rows (no conditional render; we always show the marker)
+    let mayorFiltered = mayorAll;
+    if(issue){
+      mayorFiltered = mayorAll.filter(r=>{
+        const ans=ynuNormalize(r[issue]);
+        if(!wantValue) return ans!==''; // has an answer
+        return ans===lc(wantValue);
+      });
+    }
 
+    // polygons: set stroke; fill via pattern next
     polygonLayer.setStyle(()=>({ color:'#555', weight:1, fillOpacity:0.35 }));
 
     // Ensure SVG exists before pattern work (first render path)
@@ -350,8 +369,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       });
     });
 
-    // Update markers/popups
+    // markers: ward centers + single mayor marker
     markerGroup.clearLayers();
+
+    // ward center markers
     for(const wc of wardCenters){
       if(!isFinite(wc.lat)||!isFinite(wc.lng)) continue;
       const list=byWard.get(wc.key)||[];
@@ -371,7 +392,34 @@ window.addEventListener('DOMContentLoaded', async () => {
       L.marker([wc.lat,wc.lng]).addTo(markerGroup).bindPopup(html);
     }
 
-    updateInfo(byWard, issue, wantValue);
+    // mayor marker (ALWAYS render; content depends on filter)
+    const items = mayorFiltered.map(r=>{
+      const name=buildName(r);
+      const ans = issue ? (r[issue]||'') : '';
+      let comm='';
+      if(issue){ const cf=survey.commentForIssue[issue]; if(cf) comm=r[cf]||''; }
+      const right = issue ? ` — <b>${escapeHtml(ans||'—')}</b>${comm?` — <span style="color:#555">${escapeHtml(truncate(comm))}</span>`:''}` : '';
+      return `<li>${escapeHtml(name)}${right}</li>`;
+    }).join('');
+
+    const htmlMayor=`<div style="font-size:12px">
+      <div style="font-weight:600">Mayoral Candidates (City Hall)</div>
+      <div>${issue?`Issue: <i>${escapeHtml(issue)}</i>`:'All issues'} — Matches: ${mayorFiltered.length}</div>
+      <ul style="max-height:240px;overflow:auto;margin-left:16px">${items || '<li><i>No mayoral candidates match the current filter.</i></li>'}</ul>
+    </div>`;
+
+    const mayorIcon = L.divIcon({
+      className: 'mayor-icon',
+      html: '<div title="Mayoral candidates" style="font-size:24px;line-height:24px">🏛️</div>',
+      iconSize: [24,24],
+      iconAnchor: [12,12]
+    });
+
+    L.marker([CITY_HALL.lat, CITY_HALL.lng], { icon: mayorIcon, zIndexOffset: 1500 })
+      .addTo(markerGroup)
+      .bindPopup(htmlMayor);
+
+    updateInfo(byWard, issue, wantValue, mayorFiltered.length);
   }
 
   function hashSegments(segments){
@@ -394,19 +442,20 @@ window.addEventListener('DOMContentLoaded', async () => {
   const Info=L.Control.extend({ onAdd:function(){ const d=L.DomUtil.create('div'); Object.assign(d.style,{background:'white',padding:'6px 10px',border:'1px solid #ccc',borderRadius:'8px',fontSize:'12px'}); d.id='info-box'; return d; }});
   map.addControl(new Info({position:'topright'}));
 
-  function updateInfo(byWard, issue, want){
+  function updateInfo(byWard, issue, want, mayorCount){
     const box=document.getElementById('info-box'); if(!box) return;
     let total=0; for(const rows of byWard.values()) total+=rows.length;
     box.innerHTML=`
-      <div><b>Survey rows (shown):</b> ${total}</div>
+      <div><b>Survey rows (shown, wards):</b> ${total}</div>
+      <div><b>Mayoral rows (shown):</b> ${mayorCount}</div>
       <div><b>Issue:</b> ${escapeHtml(issue||'(No issue selected)')}</div>
       <div><b>Answer filter:</b> ${escapeHtml(want||'(Any)')}</div>
       <div>Ward fill shows mix of Yes / No / Undecided for the current filter. Tile size: ${STRIPE_SIZE}px</div>
+      <div>🏛️ marker at City Hall always visible; popup reflects current filter.</div>
     `;
   }
 
   // Diagnostics
-  console.log('Header1 First/Last indices:', {firstIdx: survey.firstIdx, lastIdx: survey.lastIdx});
   console.log('Issue columns (first 10):', survey.issueColumns.slice(0,10));
   console.log('Total survey rows:', survey.rows.length);
 });
