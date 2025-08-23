@@ -1,7 +1,8 @@
-/* voter_guide.js — Auto-apply filters on change; no buttons
-   - Uses header1 "First name"/"Last name" explicitly
-   - Issue filters, ward coloring, per-answer comments
+/* voter_guide.js — Striped ward fills by response mix; auto-apply filters; no buttons
+   - Uses header1 "First name"/"Last name" for names
+   - Issue filters, per-answer comments
    - Robust ward centroids; markers for all wards
+   - Ward polygons filled with SVG stripe patterns proportional to Yes/No/Undecided counts
 
    Dependencies (load before this file):
      Leaflet, Papa Parse, @turf/turf
@@ -11,6 +12,12 @@
 window.addEventListener('DOMContentLoaded', async () => {
   const WARDS_PATH  = 'wards.geojson';
   const SURVEY_PATH = 'survey.csv';
+
+  // ---- single knob for stripe tile size (px) ----
+  const STRIPE_SIZE = 25; // change this to adjust pattern tile width/height
+
+  const COLORS = { yes: '#2c7a2c', no: '#b22222', undecided: '#b38f00', nodata: '#cccccc' };
+  const SVGNS = 'http://www.w3.org/2000/svg';
 
   const normalize = v => (v == null ? '' : String(v).trim());
   const lc = s => s.toLowerCase();
@@ -22,6 +29,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function truncate(s,n=180){ const t=normalize(s); return t.length<=n?t:t.slice(0,n-1)+'…'; }
 
+  // ---------- Survey cleaning (2-row headers + ward slice + per-issue comments) ----------
   function cleanSurveyFromPapa(papa){
     const data=papa.data;
     if(!Array.isArray(data)||data.length<2){
@@ -44,7 +52,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const ffillHeaders=[];
     for(let i=0;i<header0.length;i++){
       const h=header0[i];
-      ffillHeaders[i]=(h && !/^Unnamed/i.test(h))?h:(i>0?ffillHeaders[i-1]:'');
+      ffillHeaders[i]=(h && !/^Unnamed/i.test(h)) ? h : (i>0 ? ffillHeaders[i-1] : '');
     }
 
     const skipIdx=new Set();
@@ -129,12 +137,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     return { rows, issueColumns, wardColumn, cols, commentForIssue, firstIdx, lastIdx, nameMixedCol };
   }
 
-  // Map
+  // --- Map (default SVG renderer; we'll access the SVG after polygons are rendered) ---
   const mapEl=document.getElementById('map');
   if(!mapEl){ console.error('Missing <div id="map">'); return; }
+
   const map=L.map('map');
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
-  const polygonLayer=L.geoJSON(null,{style:()=>({color:'#555',weight:1,fillOpacity:0.06})}).addTo(map);
+  const polygonLayer=L.geoJSON(null,{style:()=>({color:'#555',weight:1,fillOpacity:0.35})}).addTo(map);
   const markerGroup=L.layerGroup().addTo(map);
 
   const wardsGeo=await loadJSON(WARDS_PATH);
@@ -142,6 +151,22 @@ window.addEventListener('DOMContentLoaded', async () => {
   try{ map.fitBounds(polygonLayer.getBounds(),{padding:[20,20]}); }catch{}
 
   const survey=cleanSurveyFromPapa(await loadCSV(SURVEY_PATH));
+
+  // SVG helpers (created lazily after vector paths exist)
+  function getSVGRoot(){
+    const pane = map.getPanes().overlayPane;
+    return pane ? pane.querySelector('svg') : null;
+  }
+  function ensureDefs(){
+    const svg = getSVGRoot();
+    if(!svg) return null;
+    let defs = svg.querySelector('defs');
+    if(!defs){
+      defs = document.createElementNS(SVGNS,'defs');
+      svg.insertBefore(defs, svg.firstChild);
+    }
+    return defs;
+  }
 
   // Ward centers
   const wardCenters=[];
@@ -175,7 +200,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     byWardAll.get(k).push(row);
   }
 
-  // UI — auto-apply on change
+  // --- UI (auto-apply on change) ---
   injectControlUI();
 
   function injectControlUI(){
@@ -197,9 +222,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const legend=document.createElement('div');
     legend.style.marginTop='8px'; legend.style.color='#444';
-    legend.innerHTML=`<div style="margin-bottom:4px"><b>Ward color:</b> majority on selected issue</div>
+    legend.innerHTML=`<div style="margin-bottom:4px"><b>Ward fill:</b> striped by response mix (tile ${STRIPE_SIZE}px)</div>
       <div style="display:flex;gap:8px;align-items:center">
-        ${sw('#2c7a2c')} Yes ${sw('#b22222')} No ${sw('#b38f00')} Undecided ${sw('#cccccc')} No data
+        ${sw(COLORS.yes)} Yes ${sw(COLORS.no)} No ${sw(COLORS.undecided)} Undecided ${sw(COLORS.nodata)} No data
       </div>`;
 
     wrap.appendChild(title);
@@ -208,16 +233,73 @@ window.addEventListener('DOMContentLoaded', async () => {
     wrap.appendChild(legend);
     map.getContainer().appendChild(wrap);
 
-    // Auto-apply on change
     issueSel.addEventListener('change', ()=>applyFilters(issueSel.value||'', ansSel.value||'' ));
     ansSel.addEventListener('change',   ()=>applyFilters(issueSel.value||'', ansSel.value||'' ));
 
-    // Initial draw
     applyFilters('', '');
   }
 
   function sw(color){ return `<span style="display:inline-block;width:12px;height:12px;background:${color};border:1px solid #999;border-radius:3px;margin:0 6px 0 4px"></span>`; }
 
+  // --- Pattern helpers (defs created lazily) ---
+  function ensurePattern(id, segments){
+    const defs = ensureDefs();
+    if(!defs) return null;
+
+    let pat = defs.querySelector(`#${CSS.escape(id)}`);
+    if (pat) {
+      while(pat.firstChild) pat.removeChild(pat.firstChild);
+    } else {
+      pat = document.createElementNS(SVGNS,'pattern');
+      pat.setAttribute('id', id);
+      pat.setAttribute('patternUnits','userSpaceOnUse');
+      pat.setAttribute('width', STRIPE_SIZE);
+      pat.setAttribute('height', STRIPE_SIZE);
+      defs.appendChild(pat);
+    }
+    // background
+    const bg = document.createElementNS(SVGNS,'rect');
+    bg.setAttribute('x','0'); bg.setAttribute('y','0');
+    bg.setAttribute('width', STRIPE_SIZE);
+    bg.setAttribute('height', STRIPE_SIZE);
+    bg.setAttribute('fill', COLORS.nodata);
+    pat.appendChild(bg);
+
+    // Normalize & draw vertical stripes across STRIPE_SIZE width
+    let sum = segments.reduce((a,s)=>a+Math.max(0,s.frac||0),0);
+    if (sum <= 0) return pat;
+    let x = 0;
+    for (const s of segments){
+      const w = (Math.max(0,s.frac||0)/sum) * STRIPE_SIZE;
+      if (w <= 0) continue;
+      const rect = document.createElementNS(SVGNS,'rect');
+      rect.setAttribute('x', String(x));
+      rect.setAttribute('y', '0');
+      rect.setAttribute('width', String(w));
+      rect.setAttribute('height', STRIPE_SIZE);
+      rect.setAttribute('fill', s.color);
+      pat.appendChild(rect);
+      x += w;
+    }
+    return pat;
+  }
+
+  function setLayerPatternFill(layer, patternId){
+    const path = layer._path;
+    if (!path) return;
+    path.setAttribute('fill', `url(#${patternId})`);
+    path.setAttribute('fill-opacity', '0.45');
+    path.setAttribute('stroke', '#555');
+    path.setAttribute('stroke-width', '1');
+  }
+
+  function wardKeyFromFeature(feature){
+    const p = feature.properties||{};
+    return p.ward_num ? String(parseInt(String(p.ward_num),10))
+      : (String((p.label||p.WARD||p.Ward||p.name||p.id||'')).match(/\d+/)||[''])[0];
+  }
+
+  // --- Filtering + rendering ---
   function applyFilters(issue, wantValue){
     const byWard=new Map();
     for(const [k,rows] of byWardAll.entries()){
@@ -229,28 +311,46 @@ window.addEventListener('DOMContentLoaded', async () => {
           return ans===lc(wantValue);
         });
       }
-      if(!issue && !wantValue) list=rows;
-      byWard.set(k,list);
+      byWard.set(k, list);
     }
 
-    polygonLayer.setStyle((feature)=>{
-      if(!issue) return {color:'#555',weight:1,fillOpacity:0.06};
-      const p=feature.properties||{};
-      const key = p.ward_num ? String(parseInt(String(p.ward_num),10))
-        : (String((p.label||p.WARD||p.Ward||p.name||p.id||'')).match(/\d+/)||[''])[0];
-      const rows=byWardAll.get(key)||[];
-      if(!rows.length) return {color:'#777',weight:1,fillColor:'#ccc',fillOpacity:0.4};
-      const cts={yes:0,no:0,undecided:0};
-      for(const r of rows){ const a=ynuNormalize(r[issue]); if(cts.hasOwnProperty(a)) cts[a]++; }
-      const total=cts.yes+cts.no+cts.undecided;
-      if(!total) return {color:'#777',weight:1,fillColor:'#ccc',fillOpacity:0.4};
-      let fill='#cccccc';
-      if(cts.yes>=cts.no && cts.yes>=cts.undecided) fill='#2c7a2c';
-      else if(cts.no>=cts.yes && cts.no>=cts.undecided) fill='#b22222';
-      else fill='#b38f00';
-      return {color:'#555',weight:1,fillColor:fill,fillOpacity:0.35};
+    polygonLayer.setStyle(()=>({ color:'#555', weight:1, fillOpacity:0.35 }));
+
+    // Ensure SVG exists before pattern work (first render path)
+    requestAnimationFrame(() => {
+      polygonLayer.eachLayer(layer=>{
+        const feat = layer.feature;
+        const key  = wardKeyFromFeature(feat);
+        const rows = byWard.get(key)||[];
+        let yes=0, no=0, und=0;
+        if(issue){
+          for(const r of rows){
+            const a=ynuNormalize(r[issue]);
+            if(a==='yes') yes++;
+            else if(a==='no') no++;
+            else if(a==='undecided') und++;
+          }
+        }
+        const total = yes+no+und;
+
+        let segments;
+        if(!issue || total===0){
+          segments = [{ color: COLORS.nodata, frac: 1 }];
+        } else {
+          segments = [
+            { color: COLORS.yes, frac: yes },
+            { color: COLORS.no,  frac: no  },
+            { color: COLORS.undecided, frac: und }
+          ];
+        }
+
+        const patId = `wardStripe-${key}-${hashSegments(segments)}`;
+        ensurePattern(patId, segments);
+        setLayerPatternFill(layer, patId);
+      });
     });
 
+    // Update markers/popups
     markerGroup.clearLayers();
     for(const wc of wardCenters){
       if(!isFinite(wc.lat)||!isFinite(wc.lng)) continue;
@@ -274,13 +374,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     updateInfo(byWard, issue, wantValue);
   }
 
+  function hashSegments(segments){
+    const parts = segments.map(s=>`${s.color}:${Math.round((s.frac||0)*1000)}`).join('|');
+    let h=5381; for(let i=0;i<parts.length;i++){ h=((h<<5)+h)+parts.charCodeAt(i); h|=0; }
+    return Math.abs(h).toString(36);
+  }
+
   function buildName(row){
     const fn=normalize(row['__FirstName']);
     const ln=normalize(row['__LastName']);
     const combo=(fn+' '+ln).replace(/\s+/g,' ').trim();
     if(combo) return combo;
     const mix=normalize(row['__NameMixed']);
-    if(mix) return mix.replace(/\s*<[^>]*>/g,'').replace(/\b\S+@\S+\.\S+\b/g,'').replace(/\s+/g,' ').trim()||'(name)';
+    if(mix) return mix.replace(/\s*<[^>]*>/g,'').replace(/\b\S+@\S+\b/g,'').replace(/\s+/g,' ').trim()||'(name)';
     return '(name)';
   }
 
@@ -295,6 +401,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       <div><b>Survey rows (shown):</b> ${total}</div>
       <div><b>Issue:</b> ${escapeHtml(issue||'(No issue selected)')}</div>
       <div><b>Answer filter:</b> ${escapeHtml(want||'(Any)')}</div>
+      <div>Ward fill shows mix of Yes / No / Undecided for the current filter. Tile size: ${STRIPE_SIZE}px</div>
     `;
   }
 
