@@ -319,8 +319,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         const right=issue?` — <b>${escapeHtml(ans||'—')}</b>${comm?` — <span style="color:#555">${escapeHtml(truncate(comm))}</span>`:''}`:'';
         return `<li>${escapeHtml(name)}${right}</li>`;
       }).join('');
-      const btn = `<div style="margin-top:8px"><button onclick="window.openWardDrawer && window.openWardDrawer('${wc.key}')" style="border:1px solid #bbb;background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px">See all responses for ${escapeHtml(wc.name)}</button></div>`;
-      const html=`<div style="font-size:12px;max-width:320px"><div style="font-weight:600">${wc.name}</div><div>Candidates: ${list.length}${issue?` (issue: <i>${escapeHtml(issue)}</i>)`:''}</div><ul style="max-height:220px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items||'<li><i>No candidates</i></li>'}</ul>${btn}</div>`;
+      const btn = `<div style="margin-top:8px"><button onclick="window.openWardDrawer && window.openWardDrawer('${wc.key}')" style="border:1px solid #bbb;background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:16px">See all responses for ${escapeHtml(wc.name)}</button></div>`;
+      const html=`<div style="font-size:15px;max-width:320px"><div style="font-weight:600">${wc.name}</div><div>Candidates: ${list.length}${issue?` (issue: <i>${escapeHtml(issue)}</i>)`:''}</div><ul style="max-height:220px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items||'<li><i>No candidates</i></li>'}</ul>${btn}</div>`;
       L.marker([wc.lat,wc.lng]).addTo(markerGroup).bindPopup(html,{maxWidth:340});
     }
 
@@ -331,7 +331,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       const right=issue?` — <b>${escapeHtml(ans||'—')}</b>${comm?` — <span style="color:#555">${escapeHtml(truncate(comm))}</span>`:''}`:'';
       return `<li>${escapeHtml(name)}${right}</li>`;
     }).join('');
-    const htmlMayor=`<div style="font-size:12px;max-width:320px"><div style="font-weight:600">Mayoral Candidates (City Hall)</div><div>${issue?`Issue: <i>${escapeHtml(issue)}</i>`:'All issues'} — Matches: ${mayorFiltered.length}</div><ul style="max-height:240px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items || '<li><i>No mayoral candidates match the current filter.</i></li>'}</ul></div>`;
+    const htmlMayor=`<div style="font-size:15px;max-width:320px"><div style="font-weight:600">Mayoral Candidates (City Hall)</div><div>${issue?`Issue: <i>${escapeHtml(issue)}</i>`:'All issues'} — Matches: ${mayorFiltered.length}</div><ul style="max-height:240px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items || '<li><i>No mayoral candidates match the current filter.</i></li>'}</ul></div>`;
     const mayorIcon=L.divIcon({className:'mayor-icon', html:'<div title="Mayoral candidates" style="font-size:24px;line-height:24px">🏛️</div>', iconSize:[24,24], iconAnchor:[12,12]});
     L.marker([CITY_HALL.lat,CITY_HALL.lng],{icon:mayorIcon,zIndexOffset:1500}).addTo(markerGroup).bindPopup(htmlMayor,{maxWidth:340});
 
@@ -403,10 +403,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     const header=document.createElement('div');
     Object.assign(header.style,{padding:'10px 12px',borderBottom:'1px solid #eee',display:'flex',alignItems:'center',gap:'8px',flex:'0 0 auto'});
     const closeBtn=document.createElement('button'); closeBtn.textContent='✕';
-    Object.assign(closeBtn.style,{border:'1px solid #bbb',background:'#fff',borderRadius:'8px',padding:'6px 10px',cursor:'pointer',fontSize:'14px'});
+    Object.assign(closeBtn.style,{border:'1px solid #bbb',background:'#fff',borderRadius:'8px',padding:'6px 10px',cursor:'pointer',fontSize:'17px'});
     closeBtn.addEventListener('click', closeWardDrawer);
     drawerTitle=document.createElement('div');
-    Object.assign(drawerTitle.style,{fontWeight:'700',fontSize:'14px',flex:'1 1 auto',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'});
+    Object.assign(drawerTitle.style,{fontWeight:'700',fontSize:'17px',flex:'1 1 auto',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'});
     header.appendChild(closeBtn); header.appendChild(drawerTitle); drawer.appendChild(header);
 
     // controls
