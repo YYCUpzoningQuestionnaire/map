@@ -204,7 +204,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   function injectControlUI(){
     const wrap=document.createElement('div');
-    Object.assign(wrap.style,{position:'absolute',top:'12px',left:'12px',zIndex:1000,background:'white',border:'1px solid #ccc',borderRadius:'12px',padding:'8px 10px',fontSize:'12px',boxShadow:'0 1px 6px rgba(0,0,0,0.08)'});
+    Object.assign(wrap.style,{position:'absolute',top:'12px',left:'12px',zIndex:1000,background:'white',border:'1px solid #ccc',borderRadius:'12px',padding:'8px 10px',fontSize:'15px',boxShadow:'0 1px 6px rgba(0,0,0,0.08)'});
 
     const title=document.createElement('div');
     Object.assign(title.style,{fontWeight:'600',marginBottom:'6px'}); title.textContent='Issue Filter';
@@ -335,7 +335,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const mayorIcon=L.divIcon({className:'mayor-icon', html:'<div title="Mayoral candidates" style="font-size:24px;line-height:24px">🏛️</div>', iconSize:[24,24], iconAnchor:[12,12]});
     L.marker([CITY_HALL.lat,CITY_HALL.lng],{icon:mayorIcon,zIndexOffset:1500}).addTo(markerGroup).bindPopup(htmlMayor,{maxWidth:340});
 
-    updateInfo(byWard,issue,wantValue,mayorFiltered.length);
+   // updateInfo(byWard,issue,wantValue,mayorFiltered.length);
     currentFilteredByWard = byWard;
   }
 
@@ -353,13 +353,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Info control
-  const Info=L.Control.extend({ onAdd:function(){ const d=L.DomUtil.create('div'); Object.assign(d.style,{background:'white',padding:'6px 10px',border:'1px solid #ccc',borderRadius:'8px',fontSize:'12px'}); d.id='info-box'; return d; }});
+/*  const Info=L.Control.extend({ onAdd:function(){ const d=L.DomUtil.create('div'); Object.assign(d.style,{background:'white',padding:'6px 10px',border:'1px solid #ccc',borderRadius:'8px',fontSize:'15px'}); d.id='info-box'; return d; }});
   map.addControl(new Info({position:'topright'}));
   function updateInfo(byWard, issue, want, mayorCount){
     const box=document.getElementById('info-box'); if(!box) return;
     let total=0; for(const rows of byWard.values()) total+=rows.length;
     box.innerHTML=`<div><b>Survey rows (shown, wards):</b> ${total}</div><div><b>Mayoral rows (shown):</b> ${mayorCount}</div><div><b>Issue:</b> ${escapeHtml(issue||'(No issue selected)')}</div><div><b>Answer filter:</b> ${escapeHtml(want||'(Any)')}</div><div>Ward fill shows mix of Yes / No / Undecided for the current filter. Tile size: ${STRIPE_SIZE}px</div><div>🏛️ marker at City Hall always visible; popup reflects current filter.</div>`;
-  }
+  }*/
 
   // ---------- Drawer UI (fixed to body; mobile bottom sheet or desktop side drawer) ----------
   function buildDrawerUI(){
@@ -425,7 +425,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const tableWrap=document.createElement('div');
     Object.assign(tableWrap.style,{flex:'1 1 auto',overflow:'auto',WebkitOverflowScrolling:'touch',overscrollBehavior:'contain'});
     const table=document.createElement('table');
-    Object.assign(table.style,{width:'100%',borderCollapse:'collapse',fontSize:'12px'});
+    Object.assign(table.style,{width:'100%',borderCollapse:'collapse',fontSize:'15px'});
     table.innerHTML=`<thead style="position:sticky;top:0;background:#fafafa;z-index:1"><tr>
       <th style="text-align:left;border-bottom:1px solid #eee;padding:8px;white-space:nowrap">Candidate</th>
       <th style="text-align:left;border-bottom:1px solid #eee;padding:8px">Issue</th>
@@ -454,6 +454,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.documentElement.style.overflow='hidden'; document.body.style.overflow='hidden';
     requestAnimationFrame(()=>{
       if(!drawer) return;
+      drawer.style.width = '100vw'; // Set the drawer to 100% of the screen width
       if(drawerMode==='mobile') drawer.style.transform='translateY(0)'; else drawer.style.transform='translateX(0)';
       map.invalidateSize();
     });
