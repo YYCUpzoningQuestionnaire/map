@@ -367,7 +367,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     drawerOverlay=document.createElement('div');
     Object.assign(drawerOverlay.style,{position:'fixed',inset:'0',background:'rgba(0,0,0,0.25)',display:'none',zIndex:9998});
     document.body.appendChild(drawerOverlay);
-    drawerOverlay.addEventListener('click', closeWardDrawer);
+  //  drawerOverlay.addEventListener('click', closeWardDrawer);
 
     // drawer
     drawer=document.createElement('div');
