@@ -1,9 +1,0 @@
-name: Disable Pages Deployment
-on:
-  workflow_call:
-
-jobs:
-  noop:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "No-op workflow to clear deploy-pages registration"
