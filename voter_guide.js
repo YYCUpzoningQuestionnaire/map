@@ -459,14 +459,18 @@ window.addEventListener('DOMContentLoaded', async () => {
       map.invalidateSize();
     });
   }
+function closeWardDrawer() {
+  const existing = document.querySelector('.ward-drawer-overlay');
+  if (existing) existing.remove();
+}
 
-  function closeWardDrawer(){
+/* function closeWardDrawer(){
     if(drawer){ if(drawerMode==='mobile') drawer.style.transform='translateY(100%)'; else drawer.style.transform='translateX(100%)'; }
     if(drawerOverlay) drawerOverlay.style.display='none';
     document.documentElement.style.overflow=''; document.body.style.overflow='';
     map.invalidateSize();
   }
-
+*/
   function renderWardDrawer(wardKey){
     if(!wardKey || !drawerTableBody) return;
     const rows=(currentFilteredByWard.get(wardKey)||[]);
