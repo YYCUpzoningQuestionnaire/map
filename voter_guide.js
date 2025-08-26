@@ -442,47 +442,56 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.closeWardDrawer=closeWardDrawer;
   }
 
-  function openWardDrawer(wardKey){
-    currentWardKey=String(wardKey||'');
-    const wc=wardCenters.find(w=>w.key===currentWardKey);
-    if(drawerTitle) drawerTitle.textContent = wc ? `All responses — ${wc.name}` : `All responses — Ward ${currentWardKey}`;
-    if(drawerIssueSel) drawerIssueSel.value=''; if(drawerAnsSel) drawerAnsSel.value=''; if(drawerSearch) drawerSearch.value='';
+  function openWardDrawer(wardKey) {
+    currentWardKey = String(wardKey || '');
+    const wc = wardCenters.find(w => w.key === currentWardKey);
+    if (drawerTitle) drawerTitle.textContent = wc ? `All responses — ${wc.name}` : `All responses — Ward ${currentWardKey}`;
+    if (drawerIssueSel) drawerIssueSel.value = '';
+    if (drawerAnsSel) drawerAnsSel.value = '';
+    if (drawerSearch) drawerSearch.value = '';
     renderWardDrawer(currentWardKey);
-    if(drawerOverlay) drawerOverlay.style.display='block';
-    document.documentElement.style.overflow='hidden'; document.body.style.overflow='hidden';
-    requestAnimationFrame(()=>{
-      if(!drawer) return;
+    if (drawerOverlay) drawerOverlay.style.display = 'block';
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    // Disable map interactions
+    if (typeof map !== 'undefined') {
+      map.dragging.disable();
+      map.touchZoom.disable();
+      map.doubleClickZoom.disable();
+      map.scrollWheelZoom.disable();
+    }
+
+    requestAnimationFrame(() => {
+      if (!drawer) return;
       drawer.style.width = '100vw'; // Set the drawer to 100% of the screen width
-      if(drawerMode==='mobile') drawer.style.transform='translateY(0)'; else drawer.style.transform='translateX(0)';
+      if (drawerMode === 'mobile') drawer.style.transform = 'translateY(0)';
+      else drawer.style.transform = 'translateX(0)';
       map.invalidateSize();
     });
   }
-function closeWardDrawer() {
-  const existing = document.querySelector('.ward-drawer-overlay');
-  if (existing) existing.remove();
-  if (typeof map !== 'undefined') {
-    map.dragging.enable();
-    map.touchZoom.enable();
-    map.doubleClickZoom.enable();
-    map.scrollWheelZoom.enable();
-  }
-}
 
-/* function closeWardDrawer() {
-  const existing = document.querySelector('.ward-drawer-overlay');
-  if (existing) existing.remove();
-  if (typeof map !== 'undefined') {
-    map.dragging.enable();
-    map.touchZoom.enable();
-    map.doubleClickZoom.enable();
-    map.scrollWheelZoom.enable();
+  function closeWardDrawer() {
+    if (drawerOverlay) drawerOverlay.style.display = 'none';
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+
+    // Re-enable map interactions
+    if (typeof map !== 'undefined') {
+      map.dragging.enable();
+      map.touchZoom.enable();
+      map.doubleClickZoom.enable();
+      map.scrollWheelZoom.enable();
+    }
+
+    requestAnimationFrame(() => {
+      if (!drawer) return;
+      if (drawerMode === 'mobile') drawer.style.transform = 'translateY(100%)';
+      else drawer.style.transform = 'translateX(100%)';
+      map.invalidateSize();
+    });
   }
-}
-    if(drawerOverlay) drawerOverlay.style.display='none';
-    document.documentElement.style.overflow=''; document.body.style.overflow='';
-    map.invalidateSize();
-  }
-*/
+
   function renderWardDrawer(wardKey){
     if(!wardKey || !drawerTableBody) return;
     const rows=(currentFilteredByWard.get(wardKey)||[]);
