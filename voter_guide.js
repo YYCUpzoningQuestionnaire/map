@@ -460,11 +460,23 @@ window.addEventListener('DOMContentLoaded', async () => {
 function closeWardDrawer() {
   const existing = document.querySelector('.ward-drawer-overlay');
   if (existing) existing.remove();
+  if (typeof map !== 'undefined') {
+    map.dragging.enable();
+    map.touchZoom.enable();
+    map.doubleClickZoom.enable();
+    map.scrollWheelZoom.enable();
+  }
 }
 
 /* function closeWardDrawer() {
   const existing = document.querySelector('.ward-drawer-overlay');
   if (existing) existing.remove();
+  if (typeof map !== 'undefined') {
+    map.dragging.enable();
+    map.touchZoom.enable();
+    map.doubleClickZoom.enable();
+    map.scrollWheelZoom.enable();
+  }
 }
     if(drawerOverlay) drawerOverlay.style.display='none';
     document.documentElement.style.overflow=''; document.body.style.overflow='';
