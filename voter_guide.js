@@ -367,9 +367,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     drawerOverlay=document.createElement('div');
     Object.assign(drawerOverlay.style,{position:'fixed',inset:'0',background:'rgba(0,0,0,0.25)',display:'none',zIndex:9998});
     document.body.appendChild(drawerOverlay);
-  //  drawerOverlay.addEventListener('click', closeWardDrawer);
-
-    // drawer
+  //// drawer
     drawer=document.createElement('div');
     Object.assign(drawer.style,{position:'fixed',background:'white',zIndex:9999,display:'flex',flexDirection:'column',overflow:'hidden',transition:'transform 220ms ease-out'});
     document.body.appendChild(drawer);
@@ -464,8 +462,10 @@ function closeWardDrawer() {
   if (existing) existing.remove();
 }
 
-/* function closeWardDrawer(){
-    if(drawer){ if(drawerMode==='mobile') drawer.style.transform='translateY(100%)'; else drawer.style.transform='translateX(100%)'; }
+/* function closeWardDrawer() {
+  const existing = document.querySelector('.ward-drawer-overlay');
+  if (existing) existing.remove();
+}
     if(drawerOverlay) drawerOverlay.style.display='none';
     document.documentElement.style.overflow=''; document.body.style.overflow='';
     map.invalidateSize();
