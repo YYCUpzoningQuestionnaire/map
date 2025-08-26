@@ -402,7 +402,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     Object.assign(header.style,{padding:'10px 12px',borderBottom:'1px solid #eee',display:'flex',alignItems:'center',gap:'8px',flex:'0 0 auto'});
     const closeBtn=document.createElement('button'); closeBtn.textContent='✕';
     Object.assign(closeBtn.style,{border:'1px solid #bbb',background:'#fff',borderRadius:'8px',padding:'6px 10px',cursor:'pointer',fontSize:'17px'});
-    closeBtn.addEventListener('click', closeWardDrawer);
+    closeBtn.addEventListener('click', () => {
+      closeWardDrawer();
+    });
     drawerTitle=document.createElement('div');
     Object.assign(drawerTitle.style,{fontWeight:'700',fontSize:'17px',flex:'1 1 auto',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'});
     header.appendChild(closeBtn); header.appendChild(drawerTitle); drawer.appendChild(header);
