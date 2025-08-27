@@ -319,7 +319,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const right=issue?` — <b>${escapeHtml(ans||'—')}</b>${comm?` — <span style="color:#555">${escapeHtml(truncate(comm))}</span>`:''}`:'';
         return `<li>${escapeHtml(name)}${right}</li>`;
       }).join('');
-      const btn = `<div style="margin-top:8px"><button onclick="window.openWardDrawer && window.openWardDrawer('${wc.key}')" style="border:1px solid #bbb;background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:16px">See all responses for ${escapeHtml(wc.name)}</button></div>`;
+      const btn = `<div style="margin-top:8px"><button onclick="window.openWardInNewTab && window.openWardInNewTab('${wc.key}')" style="border:1px solid #bbb;background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:16px">See all responses for ${escapeHtml(wc.name)}</button></div>`;
       const html=`<div style="font-size:15px;max-width:320px"><div style="font-weight:600">${wc.name}</div><div>Candidates: ${list.length}${issue?` (issue: <i>${escapeHtml(issue)}</i>)`:''}</div><ul style="max-height:220px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items||'<li><i>No candidates</i></li>'}</ul>${btn}</div>`;
       L.marker([wc.lat,wc.lng]).addTo(markerGroup).bindPopup(html,{maxWidth:340});
     }
@@ -366,8 +366,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     // overlay
     drawerOverlay=document.createElement('div');
     Object.assign(drawerOverlay.style,{position:'fixed',inset:'0',background:'rgba(0,0,0,0.25)',display:'none',zIndex:9998});
-    document.body.appendChild(drawerOverlay);
-  //// drawer
+    // removed drawer append
+  //  drawerOverlay.addEventListener('click', closeWardDrawer);
+
+    // drawer
     drawer=document.createElement('div');
     Object.assign(drawer.style,{position:'fixed',background:'white',zIndex:9999,display:'flex',flexDirection:'column',overflow:'hidden',transition:'transform 220ms ease-out'});
     document.body.appendChild(drawer);
@@ -402,9 +404,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     Object.assign(header.style,{padding:'10px 12px',borderBottom:'1px solid #eee',display:'flex',alignItems:'center',gap:'8px',flex:'0 0 auto'});
     const closeBtn=document.createElement('button'); closeBtn.textContent='✕';
     Object.assign(closeBtn.style,{border:'1px solid #bbb',background:'#fff',borderRadius:'8px',padding:'6px 10px',cursor:'pointer',fontSize:'17px'});
-    closeBtn.addEventListener('click', () => {
-      closeWardDrawer();
-    });
+    closeBtn.addEventListener('click', closeWardDrawer);
     drawerTitle=document.createElement('div');
     Object.assign(drawerTitle.style,{fontWeight:'700',fontSize:'17px',flex:'1 1 auto',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'});
     header.appendChild(closeBtn); header.appendChild(drawerTitle); drawer.appendChild(header);
@@ -435,98 +435,249 @@ window.addEventListener('DOMContentLoaded', async () => {
     drawerTableBody=table.querySelector('tbody');
     tableWrap.appendChild(table); drawer.appendChild(tableWrap);
 
-    const rerender=()=>renderWardDrawer(currentWardKey);
-    drawerIssueSel.addEventListener('change',rerender);
-    drawerAnsSel.addEventListener('change',rerender);
-    drawerSearch.addEventListener('input',rerender);
+    // Filtering is now handled in the new tab's JavaScript
 
-    window.openWardDrawer=openWardDrawer;
+    window.openWardInNewTab=openWardInNewTab;
+    // Keep these for backward compatibility
+    window.openWardDrawer=openWardInNewTab;
     window.closeWardDrawer=closeWardDrawer;
   }
 
-  function openWardDrawer(wardKey) {
-    currentWardKey = String(wardKey || '');
-    const wc = wardCenters.find(w => w.key === currentWardKey);
-    if (drawerTitle) drawerTitle.textContent = wc ? `All responses — ${wc.name}` : `All responses — Ward ${currentWardKey}`;
-    if (drawerIssueSel) drawerIssueSel.value = '';
-    if (drawerAnsSel) drawerAnsSel.value = '';
-    if (drawerSearch) drawerSearch.value = '';
-    renderWardDrawer(currentWardKey);
-    if (drawerOverlay) drawerOverlay.style.display = 'block';
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-
-    // Disable map interactions
-    if (typeof map !== 'undefined') {
-      map.dragging.disable();
-      map.touchZoom.disable();
-      map.doubleClickZoom.disable();
-      map.scrollWheelZoom.disable();
-    }
-
-    requestAnimationFrame(() => {
-      if (!drawer) return;
-      drawer.style.width = '100vw'; // Set the drawer to 100% of the screen width
-      if (drawerMode === 'mobile') drawer.style.transform = 'translateY(0)';
-      else drawer.style.transform = 'translateX(0)';
-      map.invalidateSize();
-    });
-  }
-
-  function closeWardDrawer() {
-    if (drawerOverlay) drawerOverlay.style.display = 'none';
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
-
-    // Re-enable map interactions
-    if (typeof map !== 'undefined') {
-      map.dragging.enable();
-      map.touchZoom.enable();
-      map.doubleClickZoom.enable();
-      map.scrollWheelZoom.enable();
-    }
-
-    requestAnimationFrame(() => {
-      if (!drawer) return;
-      if (drawerMode === 'mobile') drawer.style.transform = 'translateY(100%)';
-      else drawer.style.transform = 'translateX(100%)';
-      map.invalidateSize();
-    });
-  }
-
-  function renderWardDrawer(wardKey){
-    if(!wardKey || !drawerTableBody) return;
-    const rows=(currentFilteredByWard.get(wardKey)||[]);
-    const issueFilter=(drawerIssueSel && drawerIssueSel.value) || '';
-    const ansFilter=((drawerAnsSel && drawerAnsSel.value) || '').toLowerCase();
-    const q=lc((drawerSearch && drawerSearch.value) || '').trim();
-
-    const out=[];
-    for(const r of rows){
-      const name=escapeHtml(buildName(r));
-      for(const issue of survey.issueColumns){
-        if(issueFilter && issue!==issueFilter) continue;
-        const ansRaw=r[issue]||''; const ans=ynuNormalize(ansRaw);
-        if(ansFilter && ans!==ansFilter) continue;
+  function openWardInNewTab(wardKey) {
+    const wardKey_safe = String(wardKey || '');
+    const wc = wardCenters.find(w => w.key === wardKey_safe);
+    const rows = (currentFilteredByWard.get(wardKey_safe) || []);
+    const wardName = wc ? wc.name : `Ward ${wardKey_safe}`;
+    
+    // Generate HTML for the new tab
+    let tableRows = [];
+    for(const r of rows) {
+      const name = buildName(r);
+      const candidateIssues = [];
+      
+      for(const issue of survey.issueColumns) {
+        const ansRaw = r[issue] || '';
+        const ans = ynuNormalize(ansRaw);
         if(!ans) continue;
-        const cField=survey.commentForIssue[issue];
-        const comment=(cField?(r[cField]||''):'');
-        if(q && !lc(comment).includes(q)) continue;
-
-        out.push(`<tr>
-          <td style="border-bottom:1px solid #f0f0f0;padding:8px;white-space:nowrap">${name}</td>
-          <td style="border-bottom:1px solid #f0f0f0;padding:8px">${escapeHtml(issue)}</td>
-          <td style="border-bottom:1px solid #f0f0f0;padding:8px;white-space:nowrap">
-            <span style="font-weight:600;color:${ans==='yes'?COLORS.yes:ans==='no'?COLORS.no:COLORS.undecided}">${ans?ans[0].toUpperCase()+ans.slice(1):'—'}</span>
-          </td>
-          <td style="border-bottom:1px solid #f0f0f0;padding:8px">${escapeHtml(comment||'')}</td>
-        </tr>`);
+        
+        const cField = survey.commentForIssue[issue];
+        const comment = (cField ? (r[cField] || '') : '');
+        
+        candidateIssues.push(`
+          <div class="issue">
+            <div class="issue-name">${escapeHtml(issue)}</div>
+            <div class="issue-answer" style="color:${ans==='yes'?COLORS.yes:ans==='no'?COLORS.no:COLORS.undecided}">
+              <strong>${ans ? ans[0].toUpperCase() + ans.slice(1) : '—'}</strong>
+            </div>
+            ${comment ? `<div class="issue-comment">${escapeHtml(comment)}</div>` : ''}
+          </div>
+        `);
       }
+      
+      tableRows.push(`
+        <div class="candidate">
+          <h2>${escapeHtml(name)}</h2>
+          ${candidateIssues.join('')}
+        </div>
+      `);
     }
-    drawerTableBody.innerHTML = out.length ? out.join('') : `<tr><td colspan="4" style="padding:12px;color:#666"><i>No rows match the drawer filters.</i></td></tr>`;
+    
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>All Responses - ${escapeHtml(wardName)}</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.5;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+          }
+          header {
+            background: #f5f5f5;
+            padding: 15px 20px;
+            margin: -20px -20px 20px -20px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          h1 {
+            margin: 0;
+            font-size: 24px;
+          }
+          .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+          }
+          select, input {
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+          }
+          input[type="search"] {
+            flex: 1;
+          }
+          .candidate {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #eee;
+          }
+          .candidate h2 {
+            margin-top: 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f0f0f0;
+          }
+          .issue {
+            margin-bottom: 15px;
+            padding-left: 15px;
+            border-left: 3px solid #f0f0f0;
+          }
+          .issue-name {
+            font-weight: 600;
+            margin-bottom: 5px;
+          }
+          .issue-comment {
+            margin-top: 5px;
+            color: #555;
+            font-style: italic;
+          }
+          .back-button {
+            padding: 10px 20px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+          }
+          .back-button:hover {
+            background-color: #e9e9e9;
+          }
+          @media (max-width: 600px) {
+            .controls {
+              flex-direction: column;
+            }
+            input[type="search"] {
+              width: 100%;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <header>
+          <h1>All Responses - ${escapeHtml(wardName)}</h1>
+          <button class="back-button" onclick="window.close()">Close</button>
+        </header>
+        
+        <div class="controls">
+          <select id="issueFilter">
+            <option value="">All Issues</option>
+            ${survey.issueColumns.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+          </select>
+          <select id="answerFilter">
+            <option value="">Any Answer</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+            <option value="undecided">Undecided</option>
+          </select>
+          <input type="search" id="commentSearch" placeholder="Search comments...">
+        </div>
+        
+        <div id="candidates">
+          ${tableRows.length ? tableRows.join('') : '<p>No candidates found for this ward.</p>'}
+        </div>
+        
+        <script>
+          // Simple filtering functionality
+          const issueFilter = document.getElementById('issueFilter');
+          const answerFilter = document.getElementById('answerFilter');
+          const commentSearch = document.getElementById('commentSearch');
+          const candidates = document.querySelectorAll('.candidate');
+          
+          function applyFilters() {
+            const issue = issueFilter.value.toLowerCase();
+            const answer = answerFilter.value.toLowerCase();
+            const search = commentSearch.value.toLowerCase();
+            
+            candidates.forEach(candidate => {
+              const issues = candidate.querySelectorAll('.issue');
+              let showCandidate = false;
+              
+              issues.forEach(issueEl => {
+                const issueName = issueEl.querySelector('.issue-name').textContent.toLowerCase();
+                const issueAnswer = issueEl.querySelector('.issue-answer').textContent.toLowerCase();
+                const comment = issueEl.querySelector('.issue-comment')?.textContent.toLowerCase() || '';
+                
+                // Check if this issue matches all filters
+                let showIssue = true;
+                
+                if (issue && issueName !== issue) {
+                  showIssue = false;
+                }
+                
+                if (answer && !issueAnswer.includes(answer)) {
+                  showIssue = false;
+                }
+                
+                if (search && !comment.includes(search)) {
+                  showIssue = false;
+                }
+                
+                if (showIssue) {
+                  showCandidate = true;
+                  issueEl.style.display = '';
+                } else {
+                  issueEl.style.display = issue ? 'none' : '';
+                }
+              });
+              
+              candidate.style.display = (showCandidate || (!issue && !answer && !search)) ? '' : 'none';
+            });
+          }
+          
+          issueFilter.addEventListener('change', applyFilters);
+          answerFilter.addEventListener('change', applyFilters);
+          commentSearch.addEventListener('input', applyFilters);
+        </script>
+      </body>
+      </html>
+    `;
+    
+    // Open in new tab
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    } else {
+      alert('Please allow pop-ups to see ward responses');
+    }
   }
+  
+  // Keep closeWardDrawer for backward compatibility but it's not needed anymore
+  function closeWardDrawer() {
+    // This function is kept for backward compatibility but doesn't do anything anymore
+    console.log('closeWardDrawer called but no action needed with new tab approach');
+  }
+
+/* function closeWardDrawer(){
+    if(drawer){ if(drawerMode==='mobile') drawer.style.transform='translateY(100%)'; else drawer.style.transform='translateX(100%)'; }
+    if(drawerOverlay) drawerOverlay.style.display='none';
+    document.documentElement.style.overflow=''; document.body.style.overflow='';
+    map.invalidateSize();
+  }
+*/
+  // renderWardDrawer function has been replaced by opening data in a new tab
 
   // Diagnostics
   console.log('Issue columns (first 10):', survey.issueColumns.slice(0,10));
   console.log('Total survey rows:', survey.rows.length);
 });
+
+
+// openWardInNewTab is now defined within the main function scope
