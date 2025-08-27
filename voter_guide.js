@@ -61,7 +61,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const idxStart=findIdx0(/i'm a candidate for:/i);
     const idxEnd=findIdx0(/candidate name and email address/i);
     const idxEndFallback=idxEnd>=0?idxEnd:header0.findIndex(h=>/candidate name/i.test(h)&&/email/i.test(h));
-    const wardSlice=(idxStart>=0 && idxEndFallback>idxStart)?{start:idxStart+1,end:idxEndFallback}:null;
+    const wardSlice=(idxStart>=0 && idxEndFallback>idxStart)?{start:idxStart,end:idxEndFallback}:null;
 
     const ffillHeaders=[];
     for(let i=0;i<header0.length;i++){
