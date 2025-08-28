@@ -331,7 +331,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       const right=issue?` — <b>${escapeHtml(ans||'—')}</b>${comm?` — <span style="color:#555">${escapeHtml(truncate(comm))}</span>`:''}`:'';
       return `<li>${escapeHtml(name)}${right}</li>`;
     }).join('');
-    const htmlMayor=`<div style="font-size:15px;max-width:320px"><div style="font-weight:600">Mayoral Candidates (City Hall)</div><div>${issue?`Issue: <i>${escapeHtml(issue)}</i>`:'All issues'} — Matches: ${mayorFiltered.length}</div><ul style="max-height:240px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items || '<li><i>No mayoral candidates match the current filter.</i></li>'}</ul></div>`;
+    const mayorBtn = `<div style="margin-top:8px"><button onclick="window.openWardInNewTab && window.openWardInNewTab('mayor')" style="border:1px solid #bbb;background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:16px">See all mayoral candidate responses</button></div>`;
+    const htmlMayor=`<div style="font-size:15px;max-width:320px"><div style="font-weight:600">Mayoral Candidates (City Hall)</div><div>${issue?`Issue: <i>${escapeHtml(issue)}</i>`:'All issues'} — Matches: ${mayorFiltered.length}</div><ul style="max-height:240px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items || '<li><i>No mayoral candidates match the current filter.</i></li>'}</ul>${mayorBtn}</div>`;
     const mayorIcon=L.divIcon({className:'mayor-icon', html:'<div title="Mayoral candidates" style="font-size:24px;line-height:24px">🏛️</div>', iconSize:[24,24], iconAnchor:[12,12]});
     L.marker([CITY_HALL.lat,CITY_HALL.lng],{icon:mayorIcon,zIndexOffset:1500}).addTo(markerGroup).bindPopup(htmlMayor,{maxWidth:340});
 
@@ -445,9 +446,23 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   function openWardInNewTab(wardKey) {
     const wardKey_safe = String(wardKey || '');
+    
+    // Special case for mayoral candidates
+    if (wardKey_safe === 'mayor') {
+      const rows = mayorAll || [];
+      const wardName = "Mayoral Candidates";
+      generateTab(rows, wardName);
+      return;
+    }
+    
     const wc = wardCenters.find(w => w.key === wardKey_safe);
     const rows = (currentFilteredByWard.get(wardKey_safe) || []);
     const wardName = wc ? wc.name : `Ward ${wardKey_safe}`;
+    
+    generateTab(rows, wardName);
+  }
+  
+  function generateTab(rows, wardName) {
     
     // Generate HTML for the new tab
     let tableRows = [];
@@ -474,10 +489,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         `);
       }
       
+      // Always include the candidate even if they have no issues with answers
       tableRows.push(`
         <div class="candidate">
           <h2>${escapeHtml(name)}</h2>
-          ${candidateIssues.join('')}
+          ${candidateIssues.length ? candidateIssues.join('') : '<div class="no-responses">No responses recorded for any issues.</div>'}
         </div>
       `);
     }
@@ -546,6 +562,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             margin-top: 5px;
             color: #555;
             font-style: italic;
+          }
+          .no-responses {
+            padding: 15px;
+            color: #666;
+            font-style: italic;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            border-left: 3px solid #ddd;
           }
           .back-button {
             padding: 10px 20px;
