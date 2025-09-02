@@ -207,11 +207,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     Object.assign(wrap.style,{position:'absolute',top:'12px',left:'12px',zIndex:1000,background:'white',border:'1px solid #ccc',borderRadius:'12px',padding:'8px 10px',fontSize:'15px',boxShadow:'0 1px 6px rgba(0,0,0,0.08)'});
 
     const title=document.createElement('div');
-    Object.assign(title.style,{fontWeight:'600',marginBottom:'6px'}); title.textContent='Issue Filter';
+    Object.assign(title.style,{fontWeight:'600',marginBottom:'6px'}); title.textContent='Question Filter';
 
     const issueSel=document.createElement('select');
     issueSel.style.marginRight='6px'; issueSel.style.maxWidth='360px'; issueSel.title='Issue';
-    const optAny=document.createElement('option'); optAny.value=''; optAny.textContent='(Select an issue)'; issueSel.appendChild(optAny);
+    const optAny=document.createElement('option'); optAny.value=''; optAny.textContent='(Select a question)'; issueSel.appendChild(optAny);
     for(const c of survey.issueColumns){ const o=document.createElement('option'); o.value=c; o.textContent=c; issueSel.appendChild(o); }
 
     const ansSel=document.createElement('select');
@@ -320,7 +320,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         return `<li>${escapeHtml(name)}${right}</li>`;
       }).join('');
       const btn = `<div style="margin-top:8px"><button onclick="window.openWardInNewTab && window.openWardInNewTab('${wc.key}')" style="border:1px solid #bbb;background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:16px">See all responses for ${escapeHtml(wc.name)}</button></div>`;
-      const html=`<div style="font-size:15px;max-width:320px"><div style="font-weight:600">${wc.name}</div><div>Candidates: ${list.length}${issue?` (issue: <i>${escapeHtml(issue)}</i>)`:''}</div><ul style="max-height:220px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items||'<li><i>No candidates</i></li>'}</ul>${btn}</div>`;
+      const html=`<div style="font-size:15px;max-width:320px"><div style="font-weight:600">${wc.name}</div><div>Candidates: ${list.length}${issue?` (Question: <i>${escapeHtml(issue)}</i>)`:''}</div><ul style="max-height:220px;overflow:auto;margin-left:16px;-webkit-overflow-scrolling:touch">${items||'<li><i>No candidates</i></li>'}</ul>${btn}</div>`;
       L.marker([wc.lat,wc.lng]).addTo(markerGroup).bindPopup(html,{maxWidth:340});
     }
 
@@ -359,7 +359,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   function updateInfo(byWard, issue, want, mayorCount){
     const box=document.getElementById('info-box'); if(!box) return;
     let total=0; for(const rows of byWard.values()) total+=rows.length;
-    box.innerHTML=`<div><b>Survey rows (shown, wards):</b> ${total}</div><div><b>Mayoral rows (shown):</b> ${mayorCount}</div><div><b>Issue:</b> ${escapeHtml(issue||'(No issue selected)')}</div><div><b>Answer filter:</b> ${escapeHtml(want||'(Any)')}</div><div>Ward fill shows mix of Yes / No / Undecided for the current filter. Tile size: ${STRIPE_SIZE}px</div><div>🏛️ marker at City Hall always visible; popup reflects current filter.</div>`;
+    box.innerHTML=`<div><b>Survey rows (shown, wards):</b> ${total}</div><div><b>Mayoral rows (shown):</b> ${mayorCount}</div><div><b>Issue:</b> ${escapeHtml(issue||'(No questionselected)')}</div><div><b>Answer filter:</b> ${escapeHtml(want||'(Any)')}</div><div>Ward fill shows mix of Yes / No / Undecided for the current filter. Tile size: ${STRIPE_SIZE}px</div><div>🏛️ marker at City Hall always visible; popup reflects current filter.</div>`;
   }*/
 
   // ---------- Drawer UI (fixed to body; mobile bottom sheet or desktop side drawer) ----------
@@ -601,7 +601,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         
         <div class="controls">
           <select id="issueFilter">
-            <option value="">All Issues</option>
+            <option value="">All Questions</option>
             ${survey.issueColumns.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
           </select>
           <select id="answerFilter">
