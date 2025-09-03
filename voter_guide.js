@@ -91,7 +91,8 @@ window.addEventListener('DOMContentLoaded', async () => {
           else if (lab === 'undecided') bucket.undecided.push(idx);
           else if (lab === 'additional comments' || lab === 'additional comments:' || lab === 'open-ended response' || lab === 'open-ended response:' ||
             lab.toLowerCase().startsWith('if yes') ||
-            lab.toLowerCase().startsWith('if no')) bucket.comment.push(idx);
+            lab.toLowerCase().startsWith('if no')||
+          lab.toLowerCase().startsWith('what steps would you support to ensure that infrastructure')) bucket.comment.push(idx);
         }
         choiceIndexByGroup[g]=bucket;
         commentForIssue[g]=`__COMMENT::${g}`;
