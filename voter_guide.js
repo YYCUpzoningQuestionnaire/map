@@ -21,7 +21,35 @@ window.addEventListener('DOMContentLoaded', async () => {
   const COLORS = { yes:'#2c7a2c', no:'#b22222', undecided:'#b38f00', nodata:'#cccccc' };
   const SVGNS = 'http://www.w3.org/2000/svg';
 
+  // Elected candidates (2025 winners)
+  const WINNERS = {
+    '1':     { first: 'kim',      last: 'tyers' },
+    '2':     { first: 'jennifer', last: 'wyness' },
+    '3':     { first: 'andrew',   last: 'yule' },
+    '4':     { first: 'dj',       last: 'kelly' },
+    '5':     { first: 'raj',      last: 'dhaliwal' },
+    '6':     { first: 'john',     last: 'pantazopoulos' },
+    '7':     { first: 'myke',     last: 'atkinson' },
+    '8':     { first: 'nathan',   last: 'schmidt' },
+    '9':     { first: 'harrison', last: 'clark' },
+    '10':    { first: 'andre',    last: 'chabot' },
+    '11':    { first: 'rob',      last: 'ward' },
+    '12':    { first: 'mike',     last: 'jamieson' },
+    '13':    { first: 'dan',      last: 'mclean' },
+    '14':    { first: 'landon',   last: 'johnston' },
+    'mayor': { first: 'jeromy',   last: 'farkas' }
+  };
+
+  function isWinner(row, wardKey) {
+    const w = WINNERS[wardKey];
+    if (!w) return false;
+    const fn = lc(normalize(row['__FirstName']));
+    const ln = lc(normalize(row['__LastName']));
+    return ln === w.last && fn === w.first;
+  }
+
   // Global state
+  let winnersOnly = false;
   let currentFilteredByWard = new Map();
   let drawer = null, drawerOverlay = null, drawerTitle = null, drawerIssueSel = null,
       drawerAnsSel = null, drawerSearch = null, drawerTableBody = null, currentWardKey = null,
@@ -234,14 +262,22 @@ window.addEventListener('DOMContentLoaded', async () => {
         <span style="margin-left:12px">🏛️ = Mayoral candidates</span>
       </div>`;
 
+    const winnerWrap=document.createElement('label');
+    Object.assign(winnerWrap.style,{display:'flex',alignItems:'center',gap:'6px',marginTop:'8px',cursor:'pointer'});
+    const winnerCb=document.createElement('input'); winnerCb.type='checkbox'; winnerCb.id='winnersOnly';
+    const winnerLabel=document.createElement('span'); winnerLabel.textContent='Show only elected candidates';
+    winnerWrap.appendChild(winnerCb); winnerWrap.appendChild(winnerLabel);
+
     wrap.appendChild(title);
     wrap.appendChild(issueSel);
     wrap.appendChild(ansSel);
+    wrap.appendChild(winnerWrap);
     wrap.appendChild(legend);
     map.getContainer().appendChild(wrap);
 
     issueSel.addEventListener('change', ()=>applyFilters(issueSel.value||'', ansSel.value||'' ));
     ansSel.addEventListener('change',   ()=>applyFilters(issueSel.value||'', ansSel.value||'' ));
+    winnerCb.addEventListener('change', ()=>{ winnersOnly=winnerCb.checked; applyFilters(issueSel.value||'', ansSel.value||''); });
 
     applyFilters('', '');
   }
@@ -276,8 +312,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     const byWard=new Map();
     for(const [k,rows] of byWardAll.entries()){
       let list=rows;
+      if(winnersOnly) list=list.filter(r=>isWinner(r,k));
       if(issue){
-        list=rows.filter(r=>{
+        list=list.filter(r=>{
           const ans=ynuNormalize(r[issue]);
           if(!wantValue) return ans!==''; // has an answer
           return ans===lc(wantValue);
@@ -286,8 +323,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       byWard.set(k,list);
     }
     let mayorFiltered=mayorAll;
+    if(winnersOnly) mayorFiltered=mayorFiltered.filter(r=>isWinner(r,'mayor'));
     if(issue){
-      mayorFiltered=mayorAll.filter(r=>{
+      mayorFiltered=mayorFiltered.filter(r=>{
         const ans=ynuNormalize(r[issue]);
         if(!wantValue) return ans!==''; return ans===lc(wantValue);
       });
